@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -83,6 +85,31 @@ func generateStats(recordsChan chan<- []interface{}) {
 			buildTag("container_id", "123-foo-bar-baz"),
 		}
 
+		// GPU stats
+                // TODO: Handle more than 1 GPU per node
+                // out, err := exec.Command("nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits")
+                // numGpus := strconv.Atoi(string(out[:]))
+
+                out, err := exec.Command("nvidia-smi",
+                    "-i", "0", // TODO: Read more than just the first GPU
+                    "--query-gpu=count,memory.total,memory.used,memory.free,utilization.memory,utilization.gpu,temperature.gpu,power.draw,power.limit",
+                    "--format=csv,noheader,nounits",
+                    ).Output()
+
+                if err != nil {
+                    log.Fatal(err)
+                }
+
+                gpuStats := strings.Split(string(out[:]), ",")
+                memTotal  := gpuStats[0]
+                memUsed   := gpuStats[1]
+                memFree   := gpuStats[2]
+                memUtil   := gpuStats[3]
+                gpuUtil   := gpuStats[4]
+                temp      := gpuStats[5]
+                powerDraw := gpuStats[6]
+                powerLim  := gpuStats[7]
+
 		// The metrics themselves are values with timestamps attached.
 		var memstats runtime.MemStats
 		runtime.ReadMemStats(&memstats)
@@ -99,6 +126,14 @@ func generateStats(recordsChan chan<- []interface{}) {
 			buildDatapoint("mem.frees", timeMs, float64(memstats.Frees)),
 			buildDatapoint("proc.pid", timeMs, float64(os.Getpid())),
 			buildDatapoint("proc.uid", timeMs, float64(os.Getuid())),
+			buildDatapoint("gpu.mem_total", timeMs, float64FromString(memTotal)),
+            		buildDatapoint("gpu.mem_used", timeMs, float64FromString(memUsed)),
+            		buildDatapoint("gpu.mem_free", timeMs, float64FromString(memFree)),
+            		buildDatapoint("gpu.mem_utilization", timeMs, float64FromString(memUtil)),
+            		buildDatapoint("gpu.utilizaiton", timeMs, float64FromString(gpuUtil)),
+            		buildDatapoint("gpu.temperature", timeMs, float64FromString(temp)),
+            		buildDatapoint("gpu.power_draw", timeMs, float64FromString(powerDraw)),
+            		buildDatapoint("gpu.power_limit", timeMs, float64FromString(powerLim)),
 		}
 
 		// We could sent multiple MetricLists, each with different tags.
@@ -107,6 +142,11 @@ func generateStats(recordsChan chan<- []interface{}) {
 		recordsChan <- metriclists
 		sleep("generating more data")
 	}
+}
+
+func float64FromString(s string) float64 {
+        f, _ := strconv.ParseFloat(s, 64)
+        return float64(f)
 }
 
 func buildMetricList(topic string, tags, datapoints []interface{}) interface{} {
