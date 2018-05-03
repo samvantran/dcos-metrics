@@ -74,17 +74,26 @@ func generateStats(recordsChan chan<- []interface{}) {
         if err != nil {
             hostname = "UNKNOWN"
         }
+
+        containerId := os.Getenv("MESOS_TASK_ID")
+        if containerId == "" { 
+        	containerId = "UNKNOWN"
+        }
+
         tags := []interface{}{
             buildTag("hostname", hostname),
             buildTag("pid", strconv.Itoa(os.Getpid())),
+            buildTag("container_id", containerId),
         }
 
         // GPU stat
         out, err := exec.Command("nvidia-smi", "-i", "0", "--query-gpu=count", "--format=csv,noheader,nounits").Output()
 
-    numGpus := float64FromString(string(out[:]))
+        if err != nil { log.Println(err) }
 
-    var memTotal float64
+    	numGpus := float64FromString(string(out[:]))
+
+    	var memTotal float64
         var memUsed float64
         var memFree float64
         var memUtil float64
@@ -93,7 +102,7 @@ func generateStats(recordsChan chan<- []interface{}) {
         var powerDraw float64
         var powerLim float64
 
-    for idx := 0; idx < int(numGpus); idx++ {
+    	for idx := 0; idx < int(numGpus); idx++ {
             out, err := exec.Command("nvidia-smi",
                 "-i", strconv.Itoa(idx),
                 "--query-gpu=memory.total,memory.used,memory.free,utilization.memory,utilization.gpu,temperature.gpu,power.draw,power.limit",
@@ -120,15 +129,6 @@ func generateStats(recordsChan chan<- []interface{}) {
         runtime.ReadMemStats(&memstats)
         datapoints := []interface{}{
             buildDatapoint("time.unix", timeMs, float64(now.Unix())),
-            buildDatapoint("time.unix_ms", timeMs, float64(timeMs)),
-            buildDatapoint("time.uptime_ms", timeMs,
-                float64((now.UnixNano()-startTime.UnixNano())/1000/1000)),
-            buildDatapoint("mem.alloc", timeMs, float64(memstats.Alloc)),
-            buildDatapoint("mem.total_alloc", timeMs, float64(memstats.TotalAlloc)),
-            buildDatapoint("mem.sys", timeMs, float64(memstats.Sys)),
-            buildDatapoint("mem.lookups", timeMs, float64(memstats.Lookups)),
-            buildDatapoint("mem.mallocs", timeMs, float64(memstats.Mallocs)),
-            buildDatapoint("mem.frees", timeMs, float64(memstats.Frees)),
             buildDatapoint("proc.pid", timeMs, float64(os.Getpid())),
             buildDatapoint("proc.uid", timeMs, float64(os.Getuid())),
             buildDatapoint("gpu.mem_total", timeMs, float64(memTotal)),
@@ -151,7 +151,7 @@ func generateStats(recordsChan chan<- []interface{}) {
 
 func float64FromString(s string) float64 {
         f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-    if err != nil { fmt.Println(err) }
+    	if err != nil { fmt.Println(err) }
         return f
 }
 
@@ -265,3 +265,4 @@ func (t *TCPWriterProxy) Write(b []byte) (int, error) {
     log.Printf("Wrote %d bytes to endpoint '%s'\n", n, *sendEndpointFlag)
     return n, nil
 }
+
