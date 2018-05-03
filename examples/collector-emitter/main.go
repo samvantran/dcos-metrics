@@ -1,21 +1,19 @@
 package main
 
-// 'go generate' must be run for the 'metricsSchema' package to be present:
-//go:generate go run ../../schema/generator.go -infile ../../schema/metrics.avsc -outfile metrics_schema/schema.go
+// 'go generate' must be run for the 'metrics-schema' package to be present:
+//go:generate go run ../../schema/go/generator.go -infile ../../schema/metrics.avsc -outfile metrics-schema/schema.go
 
 import (
 	"flag"
 	"fmt"
+	"github.com/linkedin/goavro"
+	"github.com/mesosphere/dcos-stats/examples/collector-emitter/metrics-schema"
+	"log"
 	"net"
 	"os"
 	"runtime"
 	"strconv"
 	"time"
-
-	log "github.com/Sirupsen/logrus"
-
-	"github.com/dcos/dcos-metrics/examples/collector-emitter/metrics_schema"
-	"github.com/linkedin/goavro"
 )
 
 var (
@@ -31,14 +29,14 @@ var (
 	blockTickMsFlag = flag.Int("block-tick-ms", 500,
 		"Number of milliseconds to wait before flushing the current avro block (0 = disabled)")
 
-	datapointNamespace = goavro.RecordEnclosingNamespace(metricsSchema.DatapointNamespace)
-	datapointSchema    = goavro.RecordSchema(metricsSchema.DatapointSchema)
+	datapointNamespace = goavro.RecordEnclosingNamespace(metrics_schema.DatapointNamespace)
+	datapointSchema    = goavro.RecordSchema(metrics_schema.DatapointSchema)
 
-	metricListNamespace = goavro.RecordEnclosingNamespace(metricsSchema.MetricListNamespace)
-	metricListSchema    = goavro.RecordSchema(metricsSchema.MetricListSchema)
+	metricListNamespace = goavro.RecordEnclosingNamespace(metrics_schema.MetricListNamespace)
+	metricListSchema    = goavro.RecordSchema(metrics_schema.MetricListSchema)
 
-	tagNamespace = goavro.RecordEnclosingNamespace(metricsSchema.TagNamespace)
-	tagSchema    = goavro.RecordSchema(metricsSchema.TagSchema)
+	tagNamespace = goavro.RecordEnclosingNamespace(metrics_schema.TagNamespace)
+	tagSchema    = goavro.RecordSchema(metrics_schema.TagSchema)
 
 	startTime = time.Now()
 )
@@ -80,7 +78,6 @@ func generateStats(recordsChan chan<- []interface{}) {
 		tags := []interface{}{
 			buildTag("hostname", hostname),
 			buildTag("pid", strconv.Itoa(os.Getpid())),
-			buildTag("container_id", "123-foo-bar-baz"),
 		}
 
 		// The metrics themselves are values with timestamps attached.
@@ -112,7 +109,7 @@ func generateStats(recordsChan chan<- []interface{}) {
 func buildMetricList(topic string, tags, datapoints []interface{}) interface{} {
 	metricList, err := goavro.NewRecord(metricListNamespace, metricListSchema)
 	if err != nil {
-		log.Fatal(fmt.Errorf("Failed to create MetricList record for topic %s: %s", topic, err))
+		log.Fatal("Failed to create MetricList record for topic %s: %s", topic, err)
 	}
 	metricList.Set("topic", topic)
 	metricList.Set("tags", tags)
@@ -144,7 +141,7 @@ func buildDatapoint(name string, timeMs int64, value float64) interface{} {
 // ---
 
 func runTCPSerializerSender(recordsChan <-chan []interface{}) {
-	codec, err := goavro.NewCodec(metricsSchema.MetricListSchema)
+	codec, err := goavro.NewCodec(metrics_schema.MetricListSchema)
 	if err != nil {
 		log.Fatal("Failed to initialize avro codec: ", err)
 	}
@@ -176,7 +173,7 @@ func runTCPSerializerSender(recordsChan <-chan []interface{}) {
 			// ... or when this much time has passed:
 			goavro.BlockTick(time.Duration(*blockTickMsFlag)*time.Millisecond))
 		if err != nil {
-			log.Fatal("Failed to create Avro writer: ", err)
+			log.Fatalf("Failed to create Avro writer: ", err)
 		}
 
 		// Send data until the connection is lost (detected via TCPWriterProxy)
@@ -203,17 +200,17 @@ func runTCPSerializerSender(recordsChan <-chan []interface{}) {
 	}
 }
 
-// TCPWriterProxy is an io.Writer which stores the error when a write fails
+// An io.Writer which stores the error when a write fails
 type TCPWriterProxy struct {
 	sock    *net.TCPConn
 	lastErr error
 }
 
-func (t *TCPWriterProxy) Write(b []byte) (int, error) {
-	n, err := t.sock.Write(b)
+func (self *TCPWriterProxy) Write(b []byte) (int, error) {
+	n, err := self.sock.Write(b)
 	if err != nil {
 		log.Println("Intercepted TCP Write failure:", err)
-		t.lastErr = err
+		self.lastErr = err
 		return 0, err
 	}
 	log.Printf("Wrote %d bytes to endpoint '%s'\n", n, *sendEndpointFlag)
